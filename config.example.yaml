@@ -1,0 +1,24 @@
+database:
+  url: "sqlite:///./data/market.db"
+
+quote:
+  refresh_seconds: 60
+  stale_seconds: 180
+
+tushare:
+  token: "YOUR_TUSHARE_TOKEN"
+
+providers:
+  quote:
+    cn_stock: akshare
+    cn_etf: tencent
+    hk_stock: tencent
+    hk_etf: tencent
+    cn_index: tencent
+    hk_index: tencent
+
+  fundamental:
+    cn_stock: tushare
+
+logging:
+  level: INFO

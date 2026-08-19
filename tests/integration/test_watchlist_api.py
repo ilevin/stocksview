@@ -1,0 +1,124 @@
+"""Watchlist / Index Watchlist API 集成测试（内存库 + 假名称 Provider）。"""
+
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.config import AppConfig, DatabaseConfig
+from app.db import init_db
+from app.main import create_app
+
+
+class FakeNameProvider:
+    """可配置的名称识别假件。"""
+
+    def __init__(self):
+        self.names = {
+            ("CN", "STOCK", "600519"): "贵州茅台",
+            ("CN", "ETF", "510300"): "沪深300ETF",
+            ("HK", "STOCK", "00700"): "腾讯控股",
+            ("CN", "INDEX", "000001"): "上证指数",
+            ("CN", "INDEX", "000300"): "沪深300",
+            ("HK", "INDEX", "HSI"): "恒生指数",
+        }
+
+    def get_name(self, market, asset_type, symbol):
+        return self.names.get((market, asset_type, symbol))
+
+
+@pytest.fixture()
+def client(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path}/test.db", connect_args={"check_same_thread": False})
+    init_db(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    config = AppConfig(database=DatabaseConfig(url=f"sqlite:///{tmp_path}/test.db"))
+    app = create_app(config)
+    app.state.session_factory = session_factory
+    app.state.name_provider = FakeNameProvider()
+
+    with TestClient(app) as c:
+        yield c
+
+
+def test_add_list_delete_reorder_watchlist(client):
+    # 添加成功 201
+    resp = client.post("/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"})
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "贵州茅台"
+
+    resp = client.post("/api/watchlist", json={"symbol": "00700", "market": "HK", "asset_type": "STOCK"})
+    assert resp.status_code == 201
+
+    # 重复添加 409
+    resp = client.post("/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"})
+    assert resp.status_code == 409
+
+    # 列表
+    items = client.get("/api/watchlist").json()["items"]
+    assert [i["instrument_id"] for i in items] == ["CN:STOCK:600519", "HK:STOCK:00700"]
+
+    # 排序
+    resp = client.put(
+        "/api/watchlist/order",
+        json={"items": [
+            {"instrument_id": "HK:STOCK:00700", "sort_order": 10},
+            {"instrument_id": "CN:STOCK:600519", "sort_order": 20},
+        ]},
+    )
+    ids = [i["instrument_id"] for i in resp.json()["items"]]
+    assert ids == ["HK:STOCK:00700", "CN:STOCK:600519"]
+
+    # 删除 204；删除后 404
+    assert client.delete("/api/watchlist/CN:STOCK:600519").status_code == 204
+    assert client.delete("/api/watchlist/CN:STOCK:600519").status_code == 404
+
+
+def test_add_unknown_symbol_returns_404(client):
+    resp = client.post("/api/watchlist", json={"symbol": "999999", "market": "CN", "asset_type": "STOCK"})
+    assert resp.status_code == 404
+    assert "无法识别" in resp.json()["detail"]
+
+
+def test_watchlist_rejects_index_type(client):
+    resp = client.post("/api/watchlist", json={"symbol": "000001", "market": "CN", "asset_type": "INDEX"})
+    assert resp.status_code == 422
+
+
+def test_index_watchlist_crud(client):
+    resp = client.post("/api/index-watchlist", json={"symbol": "000001", "market": "CN", "asset_type": "INDEX"})
+    assert resp.status_code == 201
+    assert resp.json()["name"] == "上证指数"
+
+    # 重复 409
+    assert client.post("/api/index-watchlist", json={"symbol": "000001", "market": "CN", "asset_type": "INDEX"}).status_code == 409
+
+    # 禁止 STOCK / ETF
+    assert client.post("/api/index-watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"}).status_code == 422
+    assert client.post("/api/index-watchlist", json={"symbol": "510300", "market": "CN", "asset_type": "ETF"}).status_code == 422
+
+    # 指数与股票/ETF 自选彼此独立
+    wl_ids = [i["instrument_id"] for i in client.get("/api/watchlist").json()["items"]]
+    assert "CN:INDEX:000001" not in wl_ids
+
+    # 排序 + 删除
+    client.post("/api/index-watchlist", json={"symbol": "000300", "market": "CN", "asset_type": "INDEX"})
+    resp = client.put(
+        "/api/index-watchlist/order",
+        json={"items": [
+            {"instrument_id": "CN:INDEX:000300", "sort_order": 10},
+            {"instrument_id": "CN:INDEX:000001", "sort_order": 20},
+        ]},
+    )
+    assert [i["instrument_id"] for i in resp.json()["items"]] == ["CN:INDEX:000300", "CN:INDEX:000001"]
+
+    assert client.delete("/api/index-watchlist/CN:INDEX:000001").status_code == 204
+
+
+def test_watchlist_page_renders(client):
+    resp = client.get("/watchlist")
+    assert resp.status_code == 200
+    assert "股票 / ETF 自选" in resp.text

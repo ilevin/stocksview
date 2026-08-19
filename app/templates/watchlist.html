@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自选管理 · 行情看板</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-page="watchlist">
+  <header class="topbar">
+    <h1>自选管理</h1>
+    <nav><a href="/">← 返回行情首页</a></nav>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h2>股票 / ETF 自选</h2>
+      <form id="add-watchlist-form" class="add-form">
+        <input type="text" id="wl-symbol" placeholder="证券代码，如 600519" required>
+        <select id="wl-market">
+          <option value="CN">A股</option>
+          <option value="HK">港股</option>
+        </select>
+        <select id="wl-type">
+          <option value="STOCK">股票</option>
+          <option value="ETF">ETF</option>
+        </select>
+        <button type="submit">添加</button>
+      </form>
+      <p id="wl-message" class="message hidden"></p>
+      <table class="table" id="wl-table">
+        <thead>
+          <tr>
+            <th>名称</th><th>代码</th><th>市场</th><th>类型</th><th class="right">排序</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="wl-empty" class="empty hidden">还没有自选标的，去添加一个。</p>
+    </section>
+
+    <section class="panel">
+      <h2>指数行情配置</h2>
+      <form id="add-index-form" class="add-form">
+        <input type="text" id="idx-symbol" placeholder="指数代码，如 000001（上证指数）" required>
+        <select id="idx-market">
+          <option value="CN">A股</option>
+          <option value="HK">港股</option>
+        </select>
+        <button type="submit">添加指数</button>
+      </form>
+      <p id="idx-message" class="message hidden"></p>
+      <table class="table" id="idx-table">
+        <thead>
+          <tr>
+            <th>名称</th><th>代码</th><th>市场</th><th class="right">排序</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <p id="idx-empty" class="empty hidden">还没有配置指数。</p>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
