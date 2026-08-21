@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.fundamental import FundamentalSnapshot
@@ -55,10 +55,12 @@ class FundamentalRepository:
                 result[row.instrument_id] = row
         return result
 
-    def has_data_for_date(self, trade_date: date) -> bool:
-        count = self.session.scalar(
-            select(func.count(FundamentalSnapshot.id)).where(
-                FundamentalSnapshot.trade_date == trade_date
-            )
+    def instrument_ids_with_data(self, trade_date: date) -> set[str]:
+        """当日已有估值数据的 instrument_id 集合（供覆盖率判定）。"""
+        return set(
+            self.session.scalars(
+                select(FundamentalSnapshot.instrument_id).where(
+                    FundamentalSnapshot.trade_date == trade_date
+                )
+            ).all()
         )
-        return bool(count)

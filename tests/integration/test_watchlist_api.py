@@ -175,3 +175,60 @@ def test_add_returns_201_when_refresh_fails(client):
         "/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"}
     )
     assert resp.status_code == 201
+
+
+class FakeFundamentalJob:
+    """记录即时估值获取调用的假件；exc 非 None 时模拟 Provider 故障。"""
+
+    def __init__(self, exc: Exception | None = None):
+        self.calls: list[list[str]] = []
+        self.exc = exc
+
+    def refresh_instruments(self, instrument_ids):
+        self.calls.append(list(instrument_ids))
+        if self.exc:
+            raise self.exc
+
+
+def test_add_cn_stock_triggers_fundamental_refresh(client):
+    """添加 A 股股票后立即获取该股估值。"""
+    client.app.state.fundamental_refresh = FakeFundamentalJob()
+    resp = client.post("/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"})
+    assert resp.status_code == 201
+    assert client.app.state.fundamental_refresh.calls == [["CN:STOCK:600519"]]
+
+
+def test_add_etf_or_hk_stock_skips_fundamental_refresh(client):
+    """添加 ETF / 港股不触发估值获取。"""
+    client.app.state.fundamental_refresh = FakeFundamentalJob()
+    assert client.post("/api/watchlist", json={"symbol": "510300", "market": "CN", "asset_type": "ETF"}).status_code == 201
+    assert client.post("/api/watchlist", json={"symbol": "00700", "market": "HK", "asset_type": "STOCK"}).status_code == 201
+    assert client.app.state.fundamental_refresh.calls == []
+
+
+def test_add_returns_201_when_fundamental_refresh_fails(client):
+    """估值获取失败不影响添加结果。"""
+    client.app.state.fundamental_refresh = FakeFundamentalJob(exc=RuntimeError("tushare down"))
+    resp = client.post("/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"})
+    assert resp.status_code == 201
+
+
+def test_add_hk_index_symbol_case_insensitive(client):
+    """港股指数代码大小写不敏感：hstech -> HSTECH，重复添加 409。"""
+    client.app.state.name_provider.names[("HK", "INDEX", "HSTECH")] = "恒生科技指数"
+    resp = client.post("/api/index-watchlist", json={"symbol": "hstech", "market": "HK", "asset_type": "INDEX"})
+    assert resp.status_code == 201
+    assert resp.json()["instrument_id"] == "HK:INDEX:HSTECH"
+    assert resp.json()["symbol"] == "HSTECH"
+
+    resp = client.post("/api/index-watchlist", json={"symbol": "HSTECH", "market": "HK", "asset_type": "INDEX"})
+    assert resp.status_code == 409
+
+
+def test_add_unknown_hk_index_error_includes_hint(client):
+    """港股指数识别失败时错误信息附带常见代码指引。"""
+    resp = client.post("/api/index-watchlist", json={"symbol": "HS2083", "market": "HK", "asset_type": "INDEX"})
+    assert resp.status_code == 404
+    detail = resp.json()["detail"]
+    assert "无法识别" in detail
+    assert "HSTECH" in detail

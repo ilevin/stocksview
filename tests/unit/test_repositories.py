@@ -137,4 +137,6 @@ def test_fundamental_unique_per_trade_date(session):
         )
     session.commit()
     assert float(repo.latest("CN:STOCK:600519").pe_ttm) == 21.31
-    assert repo.has_data_for_date(__import__("datetime").date(2026, 8, 18)) is True
+    assert repo.instrument_ids_with_data(
+        __import__("datetime").date(2026, 8, 18)
+    ) == {"CN:STOCK:600519"}

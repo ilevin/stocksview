@@ -75,22 +75,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         app.state.quote_cache = cache
         app.state.refresh_service = refresh_service
 
-        from contextlib import contextmanager
-
         from app.jobs.fundamental_refresh import FundamentalRefreshJob
         from app.providers.fundamental.tushare import TushareFundamentalProvider
-
-        @contextmanager
-        def calendar_repo():
-            with session_factory() as session:
-                yield TradingCalendarRepository(session)
 
         fundamental_job = FundamentalRefreshJob(
             config,
             session_factory,
             TushareFundamentalProvider(config),
             session_service,
-            calendar_repo,
         )
         app.state.fundamental_refresh = fundamental_job
 

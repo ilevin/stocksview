@@ -55,6 +55,17 @@ def _trigger_refresh(request: Request, instrument_id: str) -> None:
         pass
 
 
+def _trigger_fundamental_refresh(request: Request, instrument_id: str) -> None:
+    """添加自选 A 股后立即获取该股最近一期估值；失败不影响添加。"""
+    job = getattr(request.app.state, "fundamental_refresh", None)
+    if job is None:
+        return
+    try:
+        job.refresh_instruments([instrument_id])
+    except Exception:  # 估值获取失败不影响添加
+        pass
+
+
 @router.get("", response_model=WatchlistListResponse)
 def list_watchlist(service: WatchlistService = Depends(get_watchlist_service)):
     items = [
@@ -85,6 +96,8 @@ def add_watchlist(
         raise HTTPException(status_code=_error_status(exc), detail=str(exc)) from exc
 
     _trigger_refresh(request, instrument_id)
+    if instrument_id.startswith("CN:STOCK:"):
+        _trigger_fundamental_refresh(request, instrument_id)
     inst = service.instrument_repo.get(instrument_id)
     sort_order = service.repo.get(instrument_id).sort_order
     return WatchlistItem(

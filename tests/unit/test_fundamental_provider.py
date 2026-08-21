@@ -140,17 +140,8 @@ def job_env(monkeypatch):
     provider = TushareFundamentalProvider(config)
     monkeypatch.setattr(provider, "_pro", lambda: FakePro(_df()))
 
-    from contextlib import contextmanager
-
-    from app.repositories.trading_calendar import TradingCalendarRepository
-
-    @contextmanager
-    def calendar_repo():
-        with factory() as s:
-            yield TradingCalendarRepository(s)
-
     job = FundamentalRefreshJob(
-        config, factory, provider, MarketSessionService(_AlwaysTrading()), calendar_repo
+        config, factory, provider, MarketSessionService(_AlwaysTrading())
     )
     return {"job": job, "factory": factory}
 
@@ -181,3 +172,146 @@ def test_job_skips_when_data_exists(job_env):
     with job_env["factory"]() as s:
         count = len(s.query(FundamentalSnapshot).all())
         assert count == 1
+
+
+# ---- 覆盖率判定与补刷（回归：当日已有部分数据时新加自选不补抓） ----
+
+
+def _add_watchlist_stock(factory, instrument_id, symbol, name):
+    from app.repositories.instrument import InstrumentRepository
+    from app.repositories.watchlist import WatchlistRepository
+
+    with factory() as s:
+        InstrumentRepository(s).upsert(
+            instrument_id=instrument_id, symbol=symbol, name=name,
+            market="CN", asset_type="STOCK", currency="CNY",
+        )
+        WatchlistRepository(s).add(instrument_id, 30)
+        s.commit()
+
+
+def _spy_provider_calls(job, monkeypatch):
+    """记录 get_fundamentals 收到的 instrument_id 列表，返回记录器。"""
+    calls = []
+    orig = job.provider.get_fundamentals
+
+    def spy(instruments, trade_date=None):
+        calls.append(sorted(i.instrument_id for i in instruments))
+        return orig(instruments, trade_date)
+
+    monkeypatch.setattr(job.provider, "get_fundamentals", spy)
+    return calls
+
+
+def test_maybe_run_backfills_newly_added_stock(job_env, monkeypatch):
+    """当日刷新后盘中新增自选：下一次周期检查补齐缺口（原缺陷场景）。"""
+    job = job_env["job"]
+    factory = job_env["factory"]
+    trade_date = date(2026, 8, 18)
+    monkeypatch.setattr(job, "_latest_trade_date", lambda: trade_date)
+
+    job._maybe_run()  # 首次：仅 600519 获得当日估值
+    _add_watchlist_stock(factory, "CN:STOCK:000001", "000001", "平安银行")
+
+    job._maybe_run()  # 覆盖率检查发现缺口并补刷
+    with factory() as s:
+        assert FundamentalRepository(s).latest("CN:STOCK:000001") is not None
+
+
+def test_maybe_run_skips_when_fully_covered(job_env, monkeypatch):
+    job = job_env["job"]
+    trade_date = date(2026, 8, 18)
+    monkeypatch.setattr(job, "_latest_trade_date", lambda: trade_date)
+    job._maybe_run()
+
+    calls = _spy_provider_calls(job, monkeypatch)
+    job._maybe_run()
+    assert calls == []  # 自选 A 股当日全覆盖，不再请求
+
+
+def test_attempted_marking_and_manual_reset(job_env, monkeypatch):
+    """停牌股（Tushare 当日无记录）标记后不再重试；手动刷新强制重试。"""
+    job = job_env["job"]
+    factory = job_env["factory"]
+    trade_date = date(2026, 8, 18)
+    monkeypatch.setattr(job, "_latest_trade_date", lambda: trade_date)
+
+    _add_watchlist_stock(factory, "CN:STOCK:300750", "300750", "宁德时代")  # df 中无该行
+    calls = _spy_provider_calls(job, monkeypatch)
+
+    job._maybe_run()
+    assert calls == [["CN:STOCK:300750", "CN:STOCK:600519"]]
+    calls.clear()
+
+    job._maybe_run()  # 300750 已标记 attempted，600519 已覆盖
+    assert calls == []
+    calls.clear()
+
+    result = job.run_once(trade_date)  # 手动刷新：清空标记、强制全量
+    assert calls == [["CN:STOCK:300750", "CN:STOCK:600519"]]
+    assert result["failed"] == 1  # 300750 仍无当日数据
+    calls.clear()
+
+    job._maybe_run()  # run_once 重新标记，周期检查仍跳过
+    assert calls == []
+
+
+def test_refresh_instruments_fetches_latest_per_stock(job_env):
+    """按 instrument_id 获取最近一期估值（添加自选后即时调用）。"""
+    job = job_env["job"]
+    factory = job_env["factory"]
+    written = job.refresh_instruments(
+        ["CN:STOCK:600519", "HK:STOCK:00700", "CN:STOCK:999999"]
+    )
+    assert written == 1  # 仅 CN/STOCK 且 Tushare 有数据
+    with factory() as s:
+        fund = FundamentalRepository(s).latest("CN:STOCK:600519")
+        assert fund is not None
+        assert float(fund.pe_ttm) == 21.31
+
+
+def test_refresh_instruments_no_token_skips():
+    job = FundamentalRefreshJob(AppConfig(), None, None, None)
+    assert job.refresh_instruments(["CN:STOCK:600519"]) == 0
+
+
+def test_per_stock_query_limits_window_and_keeps_latest(monkeypatch):
+    """per-stock 查询限定日期窗口；同股多行时保留最新一期（D7）。"""
+    config = AppConfig(tushare=TushareConfig(token="fake-token-for-test"))
+    provider = TushareFundamentalProvider(config)
+    seen = []
+
+    class RecordingPro:
+        def daily_basic(self, **kwargs):
+            seen.append(kwargs)
+            # 两行历史（tushare 降序返回），应保留最新一期
+            return pd.DataFrame(
+                [
+                    {"ts_code": "600519.SH", "trade_date": "20260821", "pe_ttm": 21.0, "pb": 7.0, "dv_ttm": 3.0},
+                    {"ts_code": "600519.SH", "trade_date": "20260801", "pe_ttm": 19.0, "pb": 6.0, "dv_ttm": 2.0},
+                ]
+            )
+
+    monkeypatch.setattr(provider, "_pro", lambda: RecordingPro())
+    result = provider.get_fundamentals([MAOTAI])  # 不带 trade_date -> per-stock 模式
+    fund = result["CN:STOCK:600519"]
+    assert fund.trade_date == date(2026, 8, 21)
+    assert fund.pe_ttm == 21.0
+    assert "start_date" in seen[0] and "end_date" in seen[0]
+    assert seen[0]["start_date"] < seen[0]["end_date"]
+
+
+def test_latest_trade_date_uses_calendar_provider():
+    """启动初期日历仓储为空时经 Provider 判定，不误判为无交易日（D8）。"""
+    config = AppConfig(tushare=TushareConfig(token="fake-token-for-test"))
+    calls = []
+
+    class Calendar:
+        def is_trading_day(self, market, day):
+            calls.append((market, day))
+            return True
+
+    job = FundamentalRefreshJob(config, None, None, MarketSessionService(Calendar()))
+    trade_date = job._latest_trade_date()
+    assert trade_date is not None
+    assert calls and calls[0][0] == "CN"

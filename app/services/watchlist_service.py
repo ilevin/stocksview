@@ -22,6 +22,19 @@ from app.services.instrument_id import (
 
 logger = logging.getLogger(__name__)
 
+_HK_INDEX_CODE_HINT = (
+    "。港股指数代码为字母缩写，常见如 HSI（恒生指数）、"
+    "HSCEI（国企指数）、HSTECH（恒生科技指数），请核对后重试"
+)
+
+
+def _unknown_symbol_detail(market: str, asset_type: str, symbol: str) -> str:
+    """识别失败的报错文案；港股指数附常见代码指引。"""
+    detail = f"无法识别证券: {market}/{asset_type}/{symbol}"
+    if market.upper() == "HK" and asset_type == "INDEX":
+        detail += _HK_INDEX_CODE_HINT
+    return detail
+
 
 class ServiceError(Exception):
     """业务错误基类。"""
@@ -63,17 +76,19 @@ class BaseWatchlistService:
             raise InvalidTypeError(
                 f"asset_type 仅允许 {'/'.join(sorted(self.allowed_asset_types))}，收到 {asset_type}"
             )
+        # 港股指数代码为字母缩写（如 HSTECH），统一大写；A股/港股股票与 ETF 代码均为数字
+        symbol = symbol.strip().upper()
         instrument_id = build_instrument_id(market, asset_type, symbol)
         if self.repo.exists(instrument_id):
             raise DuplicateItemError(f"已在列表中: {instrument_id}")
 
-        name = self.name_provider.get_name(market.upper(), asset_type, symbol.strip())
+        name = self.name_provider.get_name(market.upper(), asset_type, symbol)
         if not name:
-            raise InstrumentNotFoundError(f"无法识别证券: {market}/{asset_type}/{symbol}")
+            raise InstrumentNotFoundError(_unknown_symbol_detail(market, asset_type, symbol))
 
         self.instrument_repo.upsert(
             instrument_id=instrument_id,
-            symbol=symbol.strip(),
+            symbol=symbol,
             name=name,
             market=market.upper(),
             asset_type=asset_type,

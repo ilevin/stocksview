@@ -11,7 +11,7 @@ Token 从 config.yaml -> tushare.token 读取（配置对象注入），
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from app.config import AppConfig
 from app.models.instrument import Instrument
@@ -70,6 +70,9 @@ class TushareFundamentalProvider:
                 day = date(int(trade_date_str[:4]), int(trade_date_str[4:6]), int(trade_date_str[6:8]))
             except (ValueError, IndexError):
                 day = trade_date or date.today()
+            existing = result.get(inst.instrument_id)
+            if existing is not None and existing.trade_date >= day:
+                continue  # 同一股票多行时保留最新一期
             result[inst.instrument_id] = Fundamental(
                 instrument_id=inst.instrument_id,
                 trade_date=day,
@@ -87,12 +90,16 @@ class TushareFundamentalProvider:
                 trade_date=trade_date.strftime("%Y%m%d"),
                 fields="ts_code,trade_date,pe_ttm,pb,dv_ttm",
             )
-        # 未指定日期：逐只按 ts_code 查询最新估值
+        # 未指定日期：逐只按 ts_code 查询最近估值（限定窗口；不带日期会返回全部历史）
+        end = date.today()
+        start = end - timedelta(days=400)
         frames = []
         for inst in stocks:
             frames.append(
                 pro.daily_basic(
                     ts_code=to_ts_code(inst.symbol),
+                    start_date=start.strftime("%Y%m%d"),
+                    end_date=end.strftime("%Y%m%d"),
                     fields="ts_code,trade_date,pe_ttm,pb,dv_ttm",
                 )
             )
