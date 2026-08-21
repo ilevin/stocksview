@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import AppConfig, DatabaseConfig
 from app.db import init_db
 from app.main import create_app
+from app.services.market_session_service import MarketStatus
 
 
 class FakeNameProvider:
@@ -29,6 +30,29 @@ class FakeNameProvider:
         return self.names.get((market, asset_type, symbol))
 
 
+class FakeRefreshService:
+    """记录即时刷新调用的假件；exc 非 None 时模拟 Provider 故障。"""
+
+    def __init__(self, exc: Exception | None = None):
+        self.calls: list[list[str]] = []
+        self.exc = exc
+
+    def refresh_instruments_now(self, instrument_ids):
+        self.calls.append(list(instrument_ids))
+        if self.exc:
+            raise self.exc
+
+
+class ClosedSessionService:
+    """市场恒为 CLOSED，用于验证添加后刷新不依赖市场状态。"""
+
+    def status(self, market, now=None):
+        return MarketStatus.CLOSED
+
+    def should_refresh(self, market, now=None):
+        return False
+
+
 @pytest.fixture()
 def client(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path}/test.db", connect_args={"check_same_thread": False})
@@ -41,6 +65,8 @@ def client(tmp_path):
     app.state.name_provider = FakeNameProvider()
 
     with TestClient(app) as c:
+        c.app.state.refresh_service = FakeRefreshService()
+        c.app.state.session_service = ClosedSessionService()
         yield c
 
 
@@ -122,3 +148,30 @@ def test_watchlist_page_renders(client):
     resp = client.get("/watchlist")
     assert resp.status_code == 200
     assert "股票 / ETF 自选" in resp.text
+
+
+def test_add_watchlist_triggers_refresh_when_market_closed(client):
+    """休市时段添加自选仍触发即时行情刷新（不依赖市场状态）。"""
+    resp = client.post(
+        "/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"}
+    )
+    assert resp.status_code == 201
+    assert client.app.state.refresh_service.calls == [["CN:STOCK:600519"]]
+
+
+def test_add_index_watchlist_triggers_refresh(client):
+    """休市时段添加指数同样触发即时行情刷新。"""
+    resp = client.post(
+        "/api/index-watchlist", json={"symbol": "000001", "market": "CN", "asset_type": "INDEX"}
+    )
+    assert resp.status_code == 201
+    assert client.app.state.refresh_service.calls == [["CN:INDEX:000001"]]
+
+
+def test_add_returns_201_when_refresh_fails(client):
+    """即时刷新抛异常不影响添加结果。"""
+    client.app.state.refresh_service = FakeRefreshService(exc=RuntimeError("provider down"))
+    resp = client.post(
+        "/api/watchlist", json={"symbol": "600519", "market": "CN", "asset_type": "STOCK"}
+    )
+    assert resp.status_code == 201

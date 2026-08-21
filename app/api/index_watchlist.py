@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.api.watchlist import _error_status, get_index_watchlist_service
+from app.api.watchlist import _error_status, _trigger_refresh, get_index_watchlist_service
 from app.schemas import OrderUpdateRequest, WatchlistAddRequest, WatchlistItem, WatchlistListResponse
 
 router = APIRouter(prefix="/api/index-watchlist", tags=["index-watchlist"])
@@ -27,13 +27,19 @@ def list_index_watchlist(service=Depends(get_index_watchlist_service)):
 
 
 @router.post("", response_model=WatchlistItem, status_code=201)
-def add_index_watchlist(body: WatchlistAddRequest, service=Depends(get_index_watchlist_service)):
+def add_index_watchlist(
+    body: WatchlistAddRequest,
+    request: Request,
+    service=Depends(get_index_watchlist_service),
+):
     try:
         instrument_id = service.add(
             symbol=body.symbol, market=body.market, asset_type=body.asset_type
         )
     except Exception as exc:
         raise HTTPException(status_code=_error_status(exc), detail=str(exc)) from exc
+
+    _trigger_refresh(request, instrument_id)
 
     inst = service.instrument_repo.get(instrument_id)
     sort_order = service.repo.get(instrument_id).sort_order

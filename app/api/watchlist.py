@@ -44,13 +44,10 @@ def _error_status(exc: Exception) -> int:
     return 500
 
 
-def _trigger_refresh_if_open(request: Request, instrument_id: str, market: str) -> None:
-    """添加自选时，若该市场正在交易则触发一次该资产行情更新（PRD 17.4）。"""
+def _trigger_refresh(request: Request, instrument_id: str) -> None:
+    """添加自选/指数后，无论市场状态如何均触发一次该资产行情更新（PRD 17.4）。"""
     refresher = getattr(request.app.state, "refresh_service", None)
-    session_service = getattr(request.app.state, "session_service", None)
-    if refresher is None or session_service is None:
-        return
-    if not session_service.should_refresh(market):
+    if refresher is None:
         return
     try:
         refresher.refresh_instruments_now([instrument_id])
@@ -87,7 +84,7 @@ def add_watchlist(
     except Exception as exc:
         raise HTTPException(status_code=_error_status(exc), detail=str(exc)) from exc
 
-    _trigger_refresh_if_open(request, instrument_id, body.market)
+    _trigger_refresh(request, instrument_id)
     inst = service.instrument_repo.get(instrument_id)
     sort_order = service.repo.get(instrument_id).sort_order
     return WatchlistItem(
