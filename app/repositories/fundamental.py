@@ -55,12 +55,19 @@ class FundamentalRepository:
                 result[row.instrument_id] = row
         return result
 
-    def instrument_ids_with_data(self, trade_date: date) -> set[str]:
-        """当日已有估值数据的 instrument_id 集合（供覆盖率判定）。"""
+    def covered_instrument_ids(self, trade_date: date) -> set[str]:
+        """当日已有有效估值的 instrument_id 集合（任一指标非空，供覆盖率判定）。
+
+        三指标全空的行视为未覆盖：数据源当日部分指标（如股息率）生成有
+        延迟，空行需参与后续周期补刷，待指标回填后覆盖完成。
+        """
         return set(
             self.session.scalars(
                 select(FundamentalSnapshot.instrument_id).where(
-                    FundamentalSnapshot.trade_date == trade_date
+                    FundamentalSnapshot.trade_date == trade_date,
+                    FundamentalSnapshot.pe_ttm.is_not(None)
+                    | FundamentalSnapshot.pb.is_not(None)
+                    | FundamentalSnapshot.dividend_yield_ttm.is_not(None),
                 )
             ).all()
         )

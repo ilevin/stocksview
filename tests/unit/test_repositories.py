@@ -137,6 +137,22 @@ def test_fundamental_unique_per_trade_date(session):
         )
     session.commit()
     assert float(repo.latest("CN:STOCK:600519").pe_ttm) == 21.31
-    assert repo.instrument_ids_with_data(
+    assert repo.covered_instrument_ids(
         __import__("datetime").date(2026, 8, 18)
     ) == {"CN:STOCK:600519"}
+
+
+def test_covered_ids_exclude_all_null_rows(session):
+    """三指标全空的当日行不视为已覆盖（数据源当日指标延迟生成）。"""
+    repo = FundamentalRepository(session)
+    d = __import__("datetime").date(2026, 8, 18)
+    repo.upsert(
+        FundamentalSnapshot(
+            instrument_id="CN:STOCK:600519", trade_date=d, pe_ttm=21.31, source="tushare"
+        )
+    )
+    repo.upsert(
+        FundamentalSnapshot(instrument_id="CN:STOCK:000001", trade_date=d, source="tushare")
+    )
+    session.commit()
+    assert repo.covered_instrument_ids(d) == {"CN:STOCK:600519"}

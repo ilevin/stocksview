@@ -81,6 +81,13 @@
 - `_latest_trade_date` 改用 `self.session_service.calendar.is_trading_day("CN", day)`（Provider 未缓存时自动拉取）
 - 移除 job 不再使用的 `calendar_repo_factory` 构造参数（main.py 装配与测试同步更新）
 
+
+### D9: 三指标全空的当日行视为未覆盖（实现期发现）
+
+实测（2026-08-21，真实 Token）：Tushare `daily_basic` 当日的 `dv_ttm`（股息率）晚间才生成（22:29 时全市场为空、22:47 已回填）。旧版本因时序巧合总在次日刷前一日数据，从未暴露；本变更把当日首刷提前到收盘后，每日都会写入三指标部分为空的快照，当日股息率将显示为空。
+
+修复：`covered_instrument_ids`（由 `instrument_ids_with_data` 改名并调整）只统计「任一指标非空」的行；全空行参与周期补刷重试，指标回填后覆盖完成自动停止。attempted 标记仍只兜「请求结果完全无行」的标的（停牌/新股），不误伤空行。代价：dv 回填前每 30 分钟一次全市场查询（约十余次/天），量级安全。
+
 ## Risks / Trade-offs
 
 - [腾讯接口对未知港股指数代码仍无法识别] -> 属数据源能力边界；D2 的报错指引 + README 代码表降低试错成本，404 行为符合「不允许保存未知证券」的既有需求

@@ -98,14 +98,18 @@ class FundamentalRefreshJob:
             ]
 
     def _missing_instruments(self, trade_date: date) -> list:
-        """当日缺估值的自选 A 股（剔除已标记「当日无数据」的标的）。"""
+        """当日缺有效估值的自选 A 股（剔除已标记「当日无数据」的标的）。
+
+        行存在但三指标全空也视为缺失：数据源当日指标（如股息率）生成有
+        延迟，待其回填后覆盖才完成。
+        """
         stocks = self._watchlist_cn_stocks()
         attempted = self._attempted.get(trade_date, set())
         candidates = [inst for inst in stocks if inst.instrument_id not in attempted]
         if not candidates:
             return []
         with self.session_factory() as session:
-            covered = FundamentalRepository(session).instrument_ids_with_data(trade_date)
+            covered = FundamentalRepository(session).covered_instrument_ids(trade_date)
         return [inst for inst in candidates if inst.instrument_id not in covered]
 
     def run_once(self, trade_date=None) -> dict:

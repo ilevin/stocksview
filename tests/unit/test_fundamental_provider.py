@@ -315,3 +315,19 @@ def test_latest_trade_date_uses_calendar_provider():
     trade_date = job._latest_trade_date()
     assert trade_date is not None
     assert calls and calls[0][0] == "CN"
+
+
+def test_all_null_snapshot_counts_as_missing(job_env, monkeypatch):
+    """当日行指标全空（数据源延迟）视为未覆盖，继续参与周期补刷。"""
+    job = job_env["job"]
+    factory = job_env["factory"]
+    trade_date = date(2026, 8, 18)
+    monkeypatch.setattr(job, "_latest_trade_date", lambda: trade_date)
+
+    _add_watchlist_stock(factory, "CN:STOCK:000001", "000001", "平安银行")
+    job._maybe_run()  # 000001 写入全空行（_df 中该行指标均为脏值）
+
+    calls = _spy_provider_calls(job, monkeypatch)
+    job._maybe_run()
+    # 600519 已覆盖跳过；000001 全空行仍在缺失名单，等待指标回填
+    assert calls == [["CN:STOCK:000001"]]
