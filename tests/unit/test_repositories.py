@@ -132,6 +132,8 @@ def test_fundamental_unique_per_trade_date(session):
                 instrument_id="CN:STOCK:600519",
                 trade_date=__import__("datetime").date(2026, 8, 18),
                 pe_ttm=pe,
+                pb=7.21,
+                dividend_yield_ttm=3.12,
                 source="tushare",
             )
         )
@@ -142,17 +144,22 @@ def test_fundamental_unique_per_trade_date(session):
     ) == {"CN:STOCK:600519"}
 
 
-def test_covered_ids_exclude_all_null_rows(session):
-    """三指标全空的当日行不视为已覆盖（数据源当日指标延迟生成）。"""
+def test_covered_ids_exclude_partial_null_rows(session):
+    """任一指标为空的当日行不视为已覆盖（数据源当日指标延迟生成）。"""
     repo = FundamentalRepository(session)
     d = __import__("datetime").date(2026, 8, 18)
     repo.upsert(
         FundamentalSnapshot(
-            instrument_id="CN:STOCK:600519", trade_date=d, pe_ttm=21.31, source="tushare"
+            instrument_id="CN:STOCK:600519", trade_date=d,
+            pe_ttm=21.31, pb=7.21, dividend_yield_ttm=3.12, source="tushare",
         )
     )
+    # pe/pb 有值、仅股息率为空（当日延迟生成的典型形态）
     repo.upsert(
-        FundamentalSnapshot(instrument_id="CN:STOCK:000001", trade_date=d, source="tushare")
+        FundamentalSnapshot(
+            instrument_id="CN:STOCK:000001", trade_date=d,
+            pe_ttm=5.1, pb=0.47, source="tushare",
+        )
     )
     session.commit()
     assert repo.covered_instrument_ids(d) == {"CN:STOCK:600519"}

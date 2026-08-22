@@ -56,18 +56,19 @@ class FundamentalRepository:
         return result
 
     def covered_instrument_ids(self, trade_date: date) -> set[str]:
-        """当日已有有效估值的 instrument_id 集合（任一指标非空，供覆盖率判定）。
+        """当日估值已完整的 instrument_id 集合（三指标全非空，供覆盖率判定）。
 
-        三指标全空的行视为未覆盖：数据源当日部分指标（如股息率）生成有
-        延迟，空行需参与后续周期补刷，待指标回填后覆盖完成。
+        存在空指标的行视为未覆盖：数据源当日部分指标（如股息率）生成有
+        延迟，空指标行参与周期补刷重试，回填后覆盖完成；指标当日确实无
+        值的标的（如亏损股 PE 为空）会重试至当日结束，量级安全。
         """
         return set(
             self.session.scalars(
                 select(FundamentalSnapshot.instrument_id).where(
                     FundamentalSnapshot.trade_date == trade_date,
-                    FundamentalSnapshot.pe_ttm.is_not(None)
-                    | FundamentalSnapshot.pb.is_not(None)
-                    | FundamentalSnapshot.dividend_yield_ttm.is_not(None),
+                    FundamentalSnapshot.pe_ttm.is_not(None),
+                    FundamentalSnapshot.pb.is_not(None),
+                    FundamentalSnapshot.dividend_yield_ttm.is_not(None),
                 )
             ).all()
         )

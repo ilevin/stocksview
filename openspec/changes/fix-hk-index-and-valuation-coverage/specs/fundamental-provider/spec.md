@@ -2,7 +2,7 @@
 
 ### Requirement: 更新频率
 
-估值数据 SHALL 每日收盘后更新一次（每日一次），保存到 fundamental_snapshot（UNIQUE(instrument_id, trade_date)）；应用启动时当天自选 A 股估值未全覆盖 SHALL 执行一次更新。周期检查（每 30 分钟）时，若最近交易日存在自选 A 股缺失当日估值，SHALL 补刷一次。「覆盖」指当日行存在且至少一项指标非空，三指标全空的行 SHALL 视为未覆盖（应对数据源当日指标延迟生成）。对当日确认无数据（停牌、新股等，补刷后仍缺失）的标的，SHALL NOT 在当日重复请求（内存标记，进程重启后允许再试一次）；`POST /api/admin/refresh/fundamentals` 手动刷新 SHALL 忽略该标记并重试全部自选 A 股。估值 SHALL NOT 参与每 60 秒行情刷新。
+估值数据 SHALL 每日收盘后更新一次（每日一次），保存到 fundamental_snapshot（UNIQUE(instrument_id, trade_date)）；应用启动时当天自选 A 股估值未全覆盖 SHALL 执行一次更新。周期检查（每 30 分钟）时，若最近交易日存在自选 A 股缺失当日估值，SHALL 补刷一次。「覆盖」指当日行存在且三项指标（PE/PB/股息率）均非空；任一指标为空的行 SHALL 视为未覆盖（应对数据源当日指标延迟生成，指标当日确无值的标的将每 30 分钟重试至当日结束，每次为一次全市场查询）。对当日确认无数据（停牌、新股等，补刷后仍缺失）的标的，SHALL NOT 在当日重复请求（内存标记，进程重启后允许再试一次）；`POST /api/admin/refresh/fundamentals` 手动刷新 SHALL 忽略该标记并重试全部自选 A 股。估值 SHALL NOT 参与每 60 秒行情刷新。
 
 #### Scenario: 每日一次
 - **WHEN** 当日自选 A 股估值已全覆盖
@@ -16,9 +16,9 @@
 - **WHEN** 某自选 A 股当日停牌，Tushare 无该日记录，补刷后仍缺失
 - **THEN** 当日后续周期检查跳过该标的，不再对其发起请求
 
-#### Scenario: 当日指标延迟生成的空行继续补刷
-- **WHEN** 某自选 A 股当日快照三指标（PE/PB/股息率）均为空
-- **THEN** 该标的视为未覆盖，继续参与周期补刷，直至指标回填
+#### Scenario: 当日指标延迟生成的空指标行继续补刷
+- **WHEN** 某自选 A 股当日快照任一指标（如股息率）为空
+- **THEN** 该标的视为未覆盖，继续参与周期补刷，直至指标回填或当日结束
 
 #### Scenario: 手动强制刷新
 - **WHEN** 调用 `POST /api/admin/refresh/fundamentals`
