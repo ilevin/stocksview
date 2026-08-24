@@ -36,5 +36,5 @@
 
 - [x] 5.1 本地启动验证：添加 `HK/INDEX/HSTECH`（及小写 `hstech`）成功识别为恒生科技指数并显示行情；`HK/INDEX/HS2083` 返回 404 且带代码指引
 - [x] 5.2 本地验证估值：添加一只新 A 股后 fundamental_snapshot 立即写入该股估值（最新一期而非历史数据，D7）；启动时自动补刷（D8）
-- [ ] 5.3 重新构建镜像并更新线上容器（docker compose），验证线上 9 只缺口股票在 30 分钟内补齐 2026-08-20/21 估值、恒生科技指数可添加
-- [ ] 5.4 确认 fetch-quote-on-add 变更归档后再归档本变更（`openspec archive`）
+- [x] 5.3 重新构建镜像并更新线上容器（docker compose），验证线上 9 只缺口股票在 30 分钟内补齐 2026-08-20/21 估值、恒生科技指数可添加
+- [x] 5.4 确认 fetch-quote-on-add 变更归档后再归档本变更（`openspec archive`）

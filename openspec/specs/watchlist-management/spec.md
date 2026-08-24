@@ -5,7 +5,7 @@ TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after
 ## Requirements
 ### Requirement: 股票/ETF 自选添加
 
-系统 SHALL 提供 `POST /api/watchlist`，接收 symbol、market、asset_type；仅允许 STOCK/ETF；自动识别名称后写入 instrument 与 watchlist。当前市场 OPEN 时 SHALL 触发一次该资产行情更新。
+系统 SHALL 提供 `POST /api/watchlist`，接收 symbol、market、asset_type；仅允许 STOCK/ETF；自动识别名称后写入 instrument 与 watchlist。添加成功后 SHALL 无论市场状态如何（OPEN/LUNCH_BREAK/CLOSED/HOLIDAY）均触发一次该资产行情更新；即时刷新失败 SHALL NOT 影响添加结果。添加 CN/STOCK 成功后 SHALL 同时立即获取该股最近一期估值，估值获取失败 SHALL NOT 影响添加结果。
 
 #### Scenario: 添加成功
 - **WHEN** POST `{symbol:"600519", market:"CN", asset_type:"STOCK"}` 且证券可识别
@@ -22,6 +22,22 @@ TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after
 #### Scenario: 拒绝指数类型
 - **WHEN** asset_type 为 INDEX
 - **THEN** 返回校验错误，不写入
+
+#### Scenario: 休市时段添加后立即获取行情
+- **WHEN** 市场 CLOSED（或 LUNCH_BREAK/HOLIDAY）时 POST 添加自选成功
+- **THEN** 系统对该标的执行一次行情更新，页面能显示最近收盘行情
+
+#### Scenario: 即时刷新失败不影响添加
+- **WHEN** 添加成功但行情 Provider 抛异常或超时
+- **THEN** 添加接口仍返回 201，刷新失败仅记录日志
+
+#### Scenario: 添加后立即获取估值
+- **WHEN** 添加 CN/STOCK 自选成功
+- **THEN** 系统立即获取该股最近一期估值并写入，页面无需等待收盘后刷新即可显示
+
+#### Scenario: 估值获取失败不影响添加
+- **WHEN** 添加成功但估值 Provider 抛异常或超时
+- **THEN** 添加接口仍返回 201，失败仅记录日志
 
 ### Requirement: 股票/ETF 自选删除
 
@@ -45,7 +61,7 @@ TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after
 
 ### Requirement: 指数配置
 
-系统 SHALL 提供 `GET/POST/DELETE /api/index-watchlist` 与 `PUT /api/index-watchlist/order`，行为与股票/ETF 自选一致，但仅允许 INDEX 类型，存储于独立的 index_watchlist 表。
+系统 SHALL 提供 `GET/POST/DELETE /api/index-watchlist` 与 `PUT /api/index-watchlist/order`，行为与股票/ETF 自选一致，但仅允许 INDEX 类型，存储于独立的 index_watchlist 表。添加成功后 SHALL 无论市场状态如何均触发一次该指数行情更新；即时刷新失败 SHALL NOT 影响添加结果。
 
 #### Scenario: 添加指数
 - **WHEN** POST `{symbol:"000300", market:"CN", asset_type:"INDEX"}`
@@ -59,13 +75,25 @@ TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after
 - **WHEN** 指数已在 index_watchlist
 - **THEN** 返回 409 Conflict
 
+#### Scenario: 休市时段添加指数后立即获取行情
+- **WHEN** 市场 CLOSED（或 LUNCH_BREAK/HOLIDAY）时 POST 添加指数成功
+- **THEN** 系统对该指数执行一次行情更新，页面能显示最近收盘行情
+
+#### Scenario: 即时刷新不改变周期刷新策略
+- **WHEN** 市场 CLOSED/LUNCH_BREAK/HOLIDAY 时发生添加操作触发的即时刷新
+- **THEN** 该一次性刷新执行后，60 秒后台任务仍遵守「仅 OPEN 市场刷新」策略，不对该市场做周期性行情请求
+
 ### Requirement: 自选管理页面
 
-系统 SHALL 提供 `/watchlist` 页面（Jinja2），包含股票/ETF 与指数两个独立管理区域，支持查看、添加、删除、调整排序操作。
+系统 SHALL 提供 `/watchlist` 页面（Jinja2），包含股票/ETF 与指数两个独立管理区域，支持查看、添加、删除、调整排序操作。指数添加区域 SHALL 提示港股指数代码格式（字母缩写，示例含恒生科技指数 HSTECH）。
 
 #### Scenario: 空状态
 - **WHEN** 无任何自选时访问页面
 - **THEN** 显示空状态提示，不报错
+
+#### Scenario: 港股指数代码提示
+- **WHEN** 访问 /watchlist 指数管理区域
+- **THEN** 输入框提示同时包含 A 股与港股指数代码示例（如 000001 上证指数、HSTECH 恒生科技指数）
 
 ### Requirement: 数据持久化
 
