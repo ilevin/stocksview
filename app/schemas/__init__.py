@@ -23,7 +23,28 @@ class OrderUpdateRequest(BaseModel):
     items: list[OrderItem]
 
 
+class TagCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class TagUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+class WatchlistTagsRequest(BaseModel):
+    """设置自选条目的全部标签（全量替换语义）：空数组即解除全部关联。"""
+
+    tag_ids: list[int] = Field(default_factory=list)
+
+
 # ---- 响应 ----
+
+
+class TagBrief(BaseModel):
+    """行情 / 自选响应中内嵌的标签对象。"""
+
+    id: int
+    name: str
 
 
 class WatchlistItem(BaseModel):
@@ -33,6 +54,17 @@ class WatchlistItem(BaseModel):
     market: str
     asset_type: str
     sort_order: int
+    tags: list[TagBrief] = Field(default_factory=list)
+
+
+class TagItem(BaseModel):
+    id: int
+    name: str
+    usage_count: int
+
+
+class TagListResponse(BaseModel):
+    items: list[TagItem]
 
 
 class WatchlistListResponse(BaseModel):
@@ -56,6 +88,7 @@ class QuoteItem(BaseModel):
     source_timestamp: str | None = None
     is_stale: bool = False
     delayed: bool = False
+    tags: list[TagBrief] = Field(default_factory=list)
 
 
 class QuotesResponse(BaseModel):

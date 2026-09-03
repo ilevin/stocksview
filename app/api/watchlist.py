@@ -8,16 +8,21 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.schemas import (
     OrderUpdateRequest,
+    TagBrief,
     WatchlistAddRequest,
     WatchlistItem,
     WatchlistListResponse,
+    WatchlistTagsRequest,
 )
+from app.services.tag_service import TagNotFoundError
 from app.services.watchlist_service import (
     DuplicateItemError,
     IndexWatchlistService,
     InstrumentNotFoundError,
     InvalidInstrumentError,
     InvalidTypeError,
+    TagNotAllowedError,
+    WatchlistEntryNotFoundError,
     WatchlistService,
 )
 
@@ -37,8 +42,10 @@ def get_index_watchlist_service(request: Request) -> Iterator[IndexWatchlistServ
 def _error_status(exc: Exception) -> int:
     if isinstance(exc, DuplicateItemError):
         return 409
-    if isinstance(exc, (InstrumentNotFoundError,)):
+    if isinstance(exc, (InstrumentNotFoundError, WatchlistEntryNotFoundError, TagNotFoundError)):
         return 404
+    if isinstance(exc, TagNotAllowedError):
+        return 400
     if isinstance(exc, (InvalidTypeError, InvalidInstrumentError)):
         return 422
     return 500
@@ -76,8 +83,9 @@ def list_watchlist(service: WatchlistService = Depends(get_watchlist_service)):
             market=inst.market,
             asset_type=inst.asset_type,
             sort_order=sort_order,
+            tags=[TagBrief(id=tag.id, name=tag.name) for tag in tags],
         )
-        for inst, sort_order in service.list()
+        for inst, sort_order, tags in service.list_with_tags()
     ]
     return WatchlistListResponse(items=items)
 
@@ -116,6 +124,28 @@ def delete_watchlist(
 ):
     if not service.remove(instrument_id):
         raise HTTPException(status_code=404, detail=f"自选中不存在: {instrument_id}")
+
+
+@router.put("/{instrument_id}/tags", response_model=WatchlistItem)
+def set_watchlist_tags(
+    instrument_id: str,
+    body: WatchlistTagsRequest,
+    service: WatchlistService = Depends(get_watchlist_service),
+):
+    """以全量集合替换自选条目的全部标签（v0.03b 多对多）；空数组即解除全部。"""
+    try:
+        inst, sort_order, tags = service.set_tags(instrument_id, body.tag_ids)
+    except Exception as exc:
+        raise HTTPException(status_code=_error_status(exc), detail=str(exc)) from exc
+    return WatchlistItem(
+        instrument_id=inst.instrument_id,
+        symbol=inst.symbol,
+        name=inst.name,
+        market=inst.market,
+        asset_type=inst.asset_type,
+        sort_order=sort_order,
+        tags=[TagBrief(id=tag.id, name=tag.name) for tag in tags],
+    )
 
 
 @router.put("/order", response_model=WatchlistListResponse)

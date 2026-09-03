@@ -6,6 +6,9 @@ from app.models.quote import QuoteSnapshot
 from app.models.fundamental import FundamentalSnapshot
 from app.models.setting import AppSetting
 from app.models.trading_calendar import TradingCalendarDay
+from app.models.tag import Tag
+from app.models.job_status import JobStatus
+from app.models.watchlist_tag import WatchlistTag
 
 __all__ = [
     "Instrument",
@@ -15,4 +18,7 @@ __all__ = [
     "FundamentalSnapshot",
     "AppSetting",
     "TradingCalendarDay",
+    "Tag",
+    "JobStatus",
+    "WatchlistTag",
 ]

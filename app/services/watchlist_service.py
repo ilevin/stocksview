@@ -6,9 +6,14 @@ import logging
 
 from sqlalchemy.orm import Session
 
+from sqlalchemy import delete as sa_delete
+
 from app.models.instrument import Instrument
+from app.models.tag import Tag
+from app.models.watchlist_tag import WatchlistTag
 from app.providers.base import InstrumentNameProvider
 from app.repositories.instrument import InstrumentRepository
+from app.repositories.tag import TagRepository
 from app.repositories.watchlist import (
     BaseWatchlistRepository,
     IndexWatchlistRepository,
@@ -50,6 +55,14 @@ class InstrumentNotFoundError(ServiceError):
 
 class InvalidTypeError(ServiceError):
     """资产类型不允许进入该列表。"""
+
+
+class WatchlistEntryNotFoundError(ServiceError):
+    """自选条目不存在（v0.03 标签关联接口）。"""
+
+
+class TagNotAllowedError(ServiceError):
+    """指数不支持标签（v0.03 技术方案 §10）。"""
 
 
 class BaseWatchlistService:
@@ -117,6 +130,55 @@ class WatchlistService(BaseWatchlistService):
 
     def _make_repo(self, session: Session) -> WatchlistRepository:
         return WatchlistRepository(session)
+
+    def list_with_tags(self) -> list[tuple[Instrument, int, list[Tag]]]:
+        """列表（含标签数组）；指数服务无此能力（指数不支持标签）。"""
+        return [
+            (inst, row.sort_order, tags)
+            for row, inst, tags in self.repo.list_ordered_with_tags()
+        ]
+
+    def set_tags(
+        self, instrument_id: str, tag_ids: list[int]
+    ) -> tuple[Instrument, int, list[Tag]]:
+        """以全量集合替换自选条目的全部标签关联（幂等；空数组即解除全部）。
+
+        校验顺序（design D2 修订）：先判 instrument 的 asset_type（INDEX→400，
+        指数条目只存在于 index_watchlist、不在 watchlist 表，先判类型使该
+        场景经 API 可达），再查自选行（404）、各 tag_id 存在性（404）。
+        """
+        inst = self.instrument_repo.get(instrument_id)
+        if inst is None or inst.asset_type == "INDEX":
+            if inst is not None:
+                raise TagNotAllowedError("指数不支持标签，仅股票 / ETF 可设置标签")
+            raise WatchlistEntryNotFoundError(f"自选中不存在: {instrument_id}")
+        row = self.repo.get(instrument_id)
+        if row is None:
+            raise WatchlistEntryNotFoundError(f"自选中不存在: {instrument_id}")
+
+        tag_repo = TagRepository(self.session)
+        tags: list[Tag] = []
+        for tag_id in dict.fromkeys(tag_ids):  # 去重且保序
+            tag = tag_repo.get(tag_id)
+            if tag is None:
+                from app.services.tag_service import TagNotFoundError
+
+                raise TagNotFoundError(f"标签不存在: {tag_id}")
+            tags.append(tag)
+
+        # 全量替换：清空旧关联后重建（一个条目可关联多个标签，v0.03b 多对多）
+        self.session.execute(
+            sa_delete(WatchlistTag).where(WatchlistTag.watchlist_id == row.id)
+        )
+        for tag in tags:
+            self.session.add(WatchlistTag(watchlist_id=row.id, tag_id=tag.id))
+        self.session.commit()
+        logger.info(
+            "已更新自选标签: %s -> %s",
+            instrument_id,
+            "、".join(t.name for t in tags) if tags else "无标签",
+        )
+        return inst, row.sort_order, tags
 
 
 class IndexWatchlistService(BaseWatchlistService):

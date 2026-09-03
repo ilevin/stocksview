@@ -15,7 +15,7 @@ def utcnow() -> datetime:
 
 
 class Watchlist(Base):
-    """股票 / ETF 自选（仅 STOCK / ETF）。"""
+    """股票 / ETF 自选（仅 STOCK / ETF）。标签关联见 watchlist_tag（多对多，v0.03b）。"""
 
     __tablename__ = "watchlist"
     __table_args__ = (UniqueConstraint("instrument_id", name="uq_watchlist_instrument"),)

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from app.schemas import (
     IndexQuoteItem,
     IndicesResponse,
     QuoteItem,
     QuotesResponse,
+    TagBrief,
 )
 from app.services.market_session_service import MarketStatus
 from app.services.quote_cache import QuoteCache
@@ -22,8 +23,17 @@ def _iso(dt) -> str | None:
     return dt.isoformat()
 
 
-def _assemble(request: Request, asset_type_filter: set[str]) -> tuple[list, dict]:
-    """从缓存 + SQLite 回退组装行情条目，并返回市场状态。"""
+def _assemble(
+    request: Request,
+    asset_type_filter: set[str],
+    tag_id: int | None = None,
+    untagged: bool = False,
+) -> tuple[list, dict]:
+    """从缓存 + SQLite 回退组装行情条目，并返回市场状态。
+
+    tag_id / untagged 仅对股票/ETF 生效：标签是纯展示层过滤，
+    不触发任何 Provider 请求（v0.03 技术方案 §12.2）。
+    """
     app = request.app
     session_service = app.state.session_service
     cache: QuoteCache = app.state.quote_cache
@@ -32,6 +42,7 @@ def _assemble(request: Request, asset_type_filter: set[str]) -> tuple[list, dict
     from app.repositories.watchlist import IndexWatchlistRepository, WatchlistRepository
 
     with app.state.session_factory() as session:
+        tags_map: dict[str, list] = {}
         if asset_type_filter == {"INDEX"}:
             pairs = [
                 (inst, row.sort_order)
@@ -39,11 +50,18 @@ def _assemble(request: Request, asset_type_filter: set[str]) -> tuple[list, dict
             ]
             fundamentals: dict = {}
         else:
-            pairs = [
-                (inst, row.sort_order)
-                for row, inst in WatchlistRepository(session).list_ordered()
+            triples = [
+                (row, inst, tags)
+                for row, inst, tags in WatchlistRepository(session).list_ordered_with_tags()
                 if inst.asset_type in asset_type_filter
             ]
+            if tag_id is not None:
+                # 命中"包含该标签"的条目（多对多，v0.03b）
+                triples = [t for t in triples if any(x.id == tag_id for x in t[2])]
+            elif untagged:
+                triples = [t for t in triples if not t[2]]
+            tags_map = {row.instrument_id: tags for row, _inst, tags in triples}
+            pairs = [(inst, row.sort_order) for row, inst, _tags in triples]
             fundamentals = FundamentalRepository(session).latest_many(
                 [inst.instrument_id for inst, _ in pairs]
             )
@@ -88,6 +106,7 @@ def _assemble(request: Request, asset_type_filter: set[str]) -> tuple[list, dict
                     )
                 )
             else:
+                tags = tags_map.get(inst.instrument_id, [])
                 items.append(
                     QuoteItem(
                         instrument_id=inst.instrument_id,
@@ -106,14 +125,25 @@ def _assemble(request: Request, asset_type_filter: set[str]) -> tuple[list, dict
                         source_timestamp=_iso(source_ts),
                         is_stale=cache.is_stale(inst.instrument_id, status),
                         delayed=quote.delayed if quote else False,
+                        tags=[TagBrief(id=t.id, name=t.name) for t in tags],
                     )
                 )
         return items, market_status
 
 
 @router.get("/quotes", response_model=QuotesResponse)
-def get_quotes(request: Request):
-    items, market_status = _assemble(request, {"STOCK", "ETF"})
+def get_quotes(
+    request: Request,
+    tag_id: int | None = Query(default=None, description="仅返回关联该标签的条目"),
+    untagged: bool = Query(default=False, description="仅返回无标签条目"),
+):
+    if tag_id is not None and untagged:
+        raise HTTPException(
+            status_code=422, detail="tag_id 与 untagged 不能同时使用"
+        )
+    items, market_status = _assemble(
+        request, {"STOCK", "ETF"}, tag_id=tag_id, untagged=untagged
+    )
     return QuotesResponse(market_status=market_status, items=items)
 
 

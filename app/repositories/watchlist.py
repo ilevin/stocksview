@@ -8,7 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.instrument import Instrument
+from app.models.tag import Tag
 from app.models.watchlist import IndexWatchlist, Watchlist
+from app.models.watchlist_tag import WatchlistTag
 
 T = TypeVar("T", bound=Watchlist | IndexWatchlist)
 
@@ -63,6 +65,27 @@ class BaseWatchlistRepository(Generic[T]):
 
 class WatchlistRepository(BaseWatchlistRepository[Watchlist]):
     model = Watchlist
+
+    def list_ordered_with_tags(self) -> list[tuple[Watchlist, Instrument, list[Tag]]]:
+        """带标签列表的列表（v0.03b 多对多）；在子类扩展而非泛型基类，避免波及指数仓储（design D12）。"""
+        stmt = (
+            select(Watchlist, Instrument, Tag)
+            .join(Instrument, Watchlist.instrument_id == Instrument.instrument_id)
+            .outerjoin(WatchlistTag, WatchlistTag.watchlist_id == Watchlist.id)
+            .outerjoin(Tag, Tag.id == WatchlistTag.tag_id)
+            .order_by(Watchlist.sort_order, Watchlist.id, Tag.id)
+        )
+        result: list[tuple[Watchlist, Instrument, list[Tag]]] = []
+        index: dict[int, tuple[Watchlist, Instrument, list[Tag]]] = {}
+        for row, inst, tag in self.session.execute(stmt).all():
+            item = index.get(row.id)
+            if item is None:
+                item = (row, inst, [])
+                index[row.id] = item
+                result.append(item)
+            if tag is not None:
+                item[2].append(tag)
+        return result
 
 
 class IndexWatchlistRepository(BaseWatchlistRepository[IndexWatchlist]):

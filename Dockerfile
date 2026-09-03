@@ -7,8 +7,9 @@ ENV TZ=Asia/Shanghai \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY app ./app
+COPY alembic ./alembic
 
 RUN pip install --no-cache-dir .
 
@@ -16,4 +17,5 @@ RUN mkdir -p /app/data
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# v0.03：先执行数据库迁移，成功后才启动应用；迁移失败容器退出（design D5 / 技术方案 §20）
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]

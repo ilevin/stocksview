@@ -3,12 +3,14 @@
 当日估值是否「已刷新」按自选 A 股覆盖率判定：存在缺当日数据的自选 A 股
 （含盘中新增的股票）时，下一次周期检查补刷一次。停牌/新股等 Tushare 当日
 无记录的标的在内存标记已尝试，当日不再重试；手动刷新强制重试全部。
+v0.03：每轮经 JobStatusService 记录开始 / 成功 / 失败（last-success 语义）。
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import date, timedelta
 
 from app.config import AppConfig
@@ -24,11 +26,14 @@ _CHECK_INTERVAL_SECONDS = 30 * 60  # 每 30 分钟检查一次是否需要更新
 
 
 class FundamentalRefreshJob:
-    def __init__(self, config, session_factory, provider, session_service):
+    JOB_NAME = "fundamental_refresh"
+
+    def __init__(self, config, session_factory, provider, session_service, job_status_service=None):
         self.config = config
         self.session_factory = session_factory
         self.provider = provider
         self.session_service = session_service
+        self.job_status = job_status_service
         self._task: asyncio.Task | None = None
         # {trade_date: 当日确认无数据的 instrument_id 集合}；内存态，重启后允许再试一次
         self._attempted: dict[date, set[str]] = {}
@@ -49,13 +54,26 @@ class FundamentalRefreshJob:
 
     async def _run(self) -> None:
         while True:
-            try:
-                await asyncio.to_thread(self._maybe_run)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("估值刷新任务异常")
+            await asyncio.to_thread(self._maybe_run_with_status)
             await asyncio.sleep(_CHECK_INTERVAL_SECONDS)
+
+    def _maybe_run_with_status(self) -> None:
+        """单轮检查 + 状态记录；执行完成无异常即记成功（含无 Token / 无缺口的空转）。"""
+        started = time.monotonic()
+        if self.job_status is not None:
+            self.job_status.record_started(self.JOB_NAME)
+        try:
+            self._maybe_run()
+            if self.job_status is not None:
+                self.job_status.record_success(
+                    self.JOB_NAME, int((time.monotonic() - started) * 1000)
+                )
+        except Exception as exc:
+            logger.exception("估值刷新任务异常")
+            if self.job_status is not None:
+                self.job_status.record_failure(
+                    self.JOB_NAME, int((time.monotonic() - started) * 1000), str(exc)
+                )
 
     def _latest_trade_date(self):
         """最近的 CN 交易日（含今天，若今天是交易日且已收盘）。

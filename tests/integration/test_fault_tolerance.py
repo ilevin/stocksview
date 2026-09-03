@@ -111,4 +111,4 @@ def test_health_ok_on_provider_failure(client_with_cached_data):
     app.state.refresh_service.quote_providers = FailingRegistry()
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok", "database": "ok"}
+    assert resp.json() == {"status": "ok", "database": "ok", "version": "v0.03"}

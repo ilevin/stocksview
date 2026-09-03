@@ -37,7 +37,11 @@ class TushareFundamentalProvider:
             raise RuntimeError("Tushare Token 未配置（config.yaml -> tushare.token）")
         import tushare as ts
 
-        return ts.pro_api(self.config.tushare.token)
+        # v0.03：超时由配置注入（技术方案 §27），替换 SDK 默认 30 秒
+        return ts.pro_api(
+            self.config.tushare.token,
+            timeout=self.config.providers.timeout.tushare,
+        )
 
     def get_fundamentals(
         self, instruments: list[Instrument], trade_date: date | None = None

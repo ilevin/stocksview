@@ -47,9 +47,18 @@ class FundamentalProviderConfig(BaseModel):
     cn_stock: str = "tushare"
 
 
+class TimeoutConfig(BaseModel):
+    """第三方 Provider 超时（秒，v0.03 技术方案 §27；数值可按线上耗时调整）。"""
+
+    tencent: float = 8
+    akshare: float = 45
+    tushare: float = 15
+
+
 class ProvidersConfig(BaseModel):
     quote: QuoteProviderConfig = Field(default_factory=QuoteProviderConfig)
     fundamental: FundamentalProviderConfig = Field(default_factory=FundamentalProviderConfig)
+    timeout: TimeoutConfig = Field(default_factory=TimeoutConfig)
 
 
 class LoggingConfig(BaseModel):
