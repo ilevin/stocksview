@@ -63,3 +63,23 @@ TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after
 - **WHEN** 无任何自选标的
 - **THEN** 显示「还没有自选标的，去添加一个」提示
 
+### Requirement: 行情页标签筛选
+
+行情页自选表格区 SHALL 提供标签筛选下拉，选项为「全部」「无标签」与全部已有标签；选择标签后仅展示关联该标签的股票/ETF，选择「无标签」仅展示未打标签条目，默认「全部」。筛选 SHALL 在前端本地完成（基于已加载数据过滤渲染），SHALL NOT 触发任何新的第三方行情请求；60 秒轮询刷新数据后 SHALL 保持当前筛选状态继续生效。
+
+#### Scenario: 按标签筛选
+- **WHEN** 选择标签「高股息」
+- **THEN** 表格仅显示关联「高股息」的股票/ETF
+
+#### Scenario: 无标签筛选
+- **WHEN** 选择「无标签」
+- **THEN** 表格仅显示未关联标签的股票/ETF
+
+#### Scenario: 筛选不触发行情请求
+- **WHEN** 连续切换筛选选项并观察网络请求与 Provider 调用
+- **THEN** 不产生新的行情接口请求与任何 Provider 调用
+
+#### Scenario: 轮询后筛选保持
+- **WHEN** 筛选「科技」后 60 秒轮询刷新完成
+- **THEN** 表格仍按「科技」过滤展示最新数据
+

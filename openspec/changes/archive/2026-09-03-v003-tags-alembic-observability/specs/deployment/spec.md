@@ -1,8 +1,5 @@
-# deployment Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after archive.
-## Requirements
 ### Requirement: Dockerfile
 
 项目 SHALL 提供 Dockerfile，支持 `docker build -t stock-dashboard .` 构建镜像；镜像 SHALL 包含 Alembic 迁移资产（alembic.ini 与 alembic/ 目录）及 alembic 依赖；容器启动命令 SHALL 先执行 `alembic upgrade head`，成功后再启动 uvicorn，迁移失败 SHALL 使容器退出。
@@ -18,14 +15,6 @@ TBD - created by archiving change stock-etf-dashboard-v1-1. Update Purpose after
 #### Scenario: 迁移失败容器退出
 - **WHEN** 容器启动时 alembic upgrade head 失败
 - **THEN** 容器以非零码退出，uvicorn 不启动
-
-### Requirement: docker-compose 单容器运行
-
-项目 SHALL 提供 docker-compose.yml，仅运行一个应用容器（无数据库容器），挂载 `./data:/app/data` 与 `./config.yaml:/app/config.yaml:ro`；执行 `cp config.example.yaml config.yaml && docker compose up -d` 后 SHALL 可通过 http://localhost:8000 访问。
-
-#### Scenario: compose 启动
-- **WHEN** 复制并填写配置后执行 docker compose up -d
-- **THEN** 单容器启动，首页可访问，SQLite 数据持久化在宿主机 ./data
 
 ### Requirement: 本地启动
 
@@ -47,6 +36,8 @@ README SHALL 包含：项目介绍、环境要求、本地启动、Tushare 配�
 - **WHEN** v0.02 用户按 README 升级章节操作
 - **THEN** 完成备份、基线标记与升级，数据无损且版本显示 v0.03
 
+## ADDED Requirements
+
 ### Requirement: v0.02 到 v0.03 升级部署流程
 
 对已有 v0.02 部署（含既有数据卷），升级流程 SHALL 为：备份数据库 → 停旧容器 → 以新镜像执行一次性容器 `alembic stamp 0001_v002_baseline`（挂载既有数据卷）→ 以新镜像启动正式容器（自动 upgrade head 后启动应用）。升级失败 SHALL 可通过恢复备份与旧镜像回滚。
@@ -54,4 +45,3 @@ README SHALL 包含：项目介绍、环境要求、本地启动、Tushare 配�
 #### Scenario: 线上库升级演练
 - **WHEN** 用 v0.02 数据库副本按升级流程操作并在临时端口验证
 - **THEN** 升级后原有自选/指数/快照数据完整，/health 显示 v0.03
-
